@@ -3,102 +3,108 @@
 namespace Darkwob\YoutubeMp3Converter\Progress;
 
 use Darkwob\YoutubeMp3Converter\Progress\Interfaces\ProgressInterface;
-use Darkwob\YoutubeMp3Converter\Progress\Exceptions\ProgressException;
 
 class FileProgress implements ProgressInterface
 {
-    private string $progressDir;
+    private string $directory;
+    private string $extension = '.progress';
 
-    public function __construct(string $progressDir)
+    public function __construct(string $directory)
     {
-        $this->progressDir = rtrim($progressDir, '/\\');
+        $this->directory = rtrim($directory, '/');
         
-        if (!is_dir($this->progressDir)) {
-            if (!mkdir($this->progressDir, 0777, true)) {
-                throw ProgressException::unableToWrite($this->progressDir);
-            }
+        if (!is_dir($directory) && !mkdir($directory, 0777, true)) {
+            throw new \RuntimeException("Cannot create directory: $directory");
         }
     }
 
-    public function update(string $id, string $status, int $progress, string $message): bool
+    public function update(string $id, string $status, float $progress, string $message): void
     {
-        if ($progress < -1 || $progress > 100) {
-            throw ProgressException::invalidProgress("Progress must be between -1 and 100");
-        }
-
         $data = [
             'id' => $id,
             'status' => $status,
             'progress' => $progress,
             'message' => $message,
-            'timestamp' => time()
+            'updated_at' => time()
         ];
 
         $file = $this->getFilePath($id);
-        
         if (file_put_contents($file, json_encode($data)) === false) {
-            throw ProgressException::unableToWrite($file);
+            throw new \RuntimeException("Cannot write progress file: $file");
         }
-
-        return true;
     }
 
     public function get(string $id): ?array
     {
         $file = $this->getFilePath($id);
-        
         if (!file_exists($file)) {
             return null;
         }
 
         $content = file_get_contents($file);
         if ($content === false) {
-            throw ProgressException::unableToRead($file);
+            return null;
         }
 
         $data = json_decode($content, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw ProgressException::invalidJson($file);
+            return null;
         }
 
         return $data;
     }
 
-    public function delete(string $id): bool
+    public function delete(string $id): void
     {
         $file = $this->getFilePath($id);
-        
         if (file_exists($file)) {
-            return unlink($file);
+            unlink($file);
         }
-
-        return true;
     }
 
-    public function cleanup(int $maxAge = 3600): bool
+    public function getAll(): array
     {
-        $now = time();
-        $files = glob($this->progressDir . '/*.json');
+        $pattern = $this->directory . '/*' . $this->extension;
+        $files = glob($pattern);
         
+        $progress = [];
         foreach ($files as $file) {
-            if (is_file($file)) {
-                $content = file_get_contents($file);
-                if ($content !== false) {
-                    $data = json_decode($content, true);
-                    if (is_array($data) && isset($data['timestamp'])) {
-                        if (($now - $data['timestamp']) > $maxAge) {
-                            unlink($file);
-                        }
-                    }
-                }
+            $id = basename($file, $this->extension);
+            $data = $this->get($id);
+            if ($data !== null) {
+                $progress[] = $data;
             }
         }
 
-        return true;
+        return $progress;
+    }
+
+    public function cleanup(int $maxAge = 3600): void
+    {
+        $now = time();
+        $pattern = $this->directory . '/*' . $this->extension;
+        $files = glob($pattern);
+
+        foreach ($files as $file) {
+            $content = file_get_contents($file);
+            if ($content === false) {
+                continue;
+            }
+
+            $data = json_decode($content, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                continue;
+            }
+
+            $age = $now - ($data['updated_at'] ?? 0);
+            if ($age > $maxAge) {
+                unlink($file);
+            }
+        }
     }
 
     private function getFilePath(string $id): string
     {
-        return $this->progressDir . '/' . preg_replace('/[^a-zA-Z0-9]/', '', $id) . '.json';
+        return $this->directory . '/' . $id . $this->extension;
     }
 } 
