@@ -1,7 +1,7 @@
 {
     "name": "darkwob/youtube-mp3-converter",
     "description": "A powerful YouTube to MP3 converter with playlist support",
-    "type": "project",
+    "type": "library",
     "license": "MIT",
     "authors": [
         {
@@ -10,8 +10,9 @@
         }
     ],
     "require": {
+        "php": ">=7.4",
         "norkunas/youtube-dl-php": "^2.0",
-        "php": ">=7.4"
+        "ext-json": "*"
     },
     "autoload": {
         "psr-4": {
