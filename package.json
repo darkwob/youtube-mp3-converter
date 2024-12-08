@@ -1,0 +1,29 @@
+{
+  "name": "@darkwob/youtube-mp3-converter",
+  "version": "1.0.0-beta",
+  "description": "A powerful YouTube to MP3 converter with playlist support",
+  "main": "index.php",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/darkwob/youtube-mp3-converter.git"
+  },
+  "keywords": [
+    "youtube",
+    "mp3",
+    "converter",
+    "playlist",
+    "downloader"
+  ],
+  "author": "darkwob <sadiksefa@hotmail.com.tr>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/darkwob/youtube-mp3-converter/issues"
+  },
+  "homepage": "https://github.com/darkwob/youtube-mp3-converter#readme",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+} 

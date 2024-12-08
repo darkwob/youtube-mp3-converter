@@ -4,6 +4,7 @@ bin/*.dll
 downloads/*
 temp/*
 progress/*
+proje/
 
 # Project specific
 *.mp3
