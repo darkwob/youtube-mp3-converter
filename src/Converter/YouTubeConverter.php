@@ -5,6 +5,7 @@ namespace Darkwob\YoutubeMp3Converter\Converter;
 use Darkwob\YoutubeMp3Converter\Converter\Interfaces\ConverterInterface;
 use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
 use Darkwob\YoutubeMp3Converter\Progress\Interfaces\ProgressInterface;
+use YoutubeDl\Options;
 use YoutubeDl\YoutubeDl;
 use YoutubeDl\Exception\ExecutableNotFoundException;
 use YoutubeDl\Exception\YoutubeDlException;
@@ -16,6 +17,7 @@ class YouTubeConverter implements ConverterInterface
     private string $outputDir;
     private string $tempDir;
     private array $options;
+    private string $ffmpegPath;
 
     public function __construct(
         string $binPath,
@@ -27,13 +29,12 @@ class YouTubeConverter implements ConverterInterface
         $this->validatePaths($binPath, $outputDir, $tempDir);
         
         $this->youtubeDl = new YoutubeDl();
-        $this->youtubeDl->setBinPath($binPath . '/yt-dlp');
+        $this->youtubeDl->setBinPath($binPath . DIRECTORY_SEPARATOR . 'yt-dlp');
+        $this->ffmpegPath = $binPath . DIRECTORY_SEPARATOR . 'ffmpeg';
         $this->progress = $progress;
         $this->outputDir = rtrim($outputDir, '/\\');
         $this->tempDir = rtrim($tempDir, '/\\');
         $this->options = array_merge($this->getDefaultOptions(), $options);
-        
-        $this->youtubeDl->setDownloadPath($this->tempDir);
     }
 
     public function processVideo(string $url): array
@@ -56,7 +57,7 @@ class YouTubeConverter implements ConverterInterface
                     $this->progress->update($id, 'downloading', 0, "Video {$currentVideo}/{$totalVideos} indiriliyor...");
                     $mp3Path = $this->downloadVideo($video['url'], $id);
                     
-                    if (!file_exists($this->outputDir . '/' . $mp3Path)) {
+                    if (!file_exists($this->outputDir . DIRECTORY_SEPARATOR . $mp3Path)) {
                         throw ConverterException::conversionFailed();
                     }
                     
@@ -68,6 +69,7 @@ class YouTubeConverter implements ConverterInterface
                     ];
                     
                     $this->progress->update($id, 'completed', 100, "Video başarıyla dönüştürüldü");
+                    $this->cleanupTempFiles($id);
                     
                 } catch (\Exception $e) {
                     $this->progress->update($id, 'error', -1, $e->getMessage());
@@ -77,6 +79,7 @@ class YouTubeConverter implements ConverterInterface
                         'status' => 'error',
                         'message' => $e->getMessage()
                     ];
+                    $this->cleanupTempFiles($id);
                 }
             }
             
@@ -97,8 +100,13 @@ class YouTubeConverter implements ConverterInterface
     public function getVideoInfo(string $url): array
     {
         try {
-            $this->youtubeDl->setOptions($this->options);
-            $collection = $this->youtubeDl->download($url);
+            $options = new Options();
+            $options->setFFmpegLocation($this->ffmpegPath);
+            foreach ($this->options as $key => $value) {
+                $options->set($key, $value);
+            }
+            
+            $collection = $this->youtubeDl->download($options->setUrl($url));
             
             $videos = [];
             $isPlaylist = false;
@@ -116,6 +124,23 @@ class YouTubeConverter implements ConverterInterface
                     if ($video->getPlaylist()) {
                         $isPlaylist = true;
                         $playlistTitle = $video->getPlaylist();
+                    }
+                }
+            }
+            
+            if (empty($videos)) {
+                // İkinci deneme: Farklı format seçenekleriyle
+                $options->set('format', 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio');
+                $collection = $this->youtubeDl->download($options);
+                
+                foreach ($collection->getVideos() as $video) {
+                    if (!$video->getError()) {
+                        $videos[] = [
+                            'id' => $video->getId(),
+                            'title' => $video->getTitle(),
+                            'url' => $url,
+                            'duration' => $video->getDuration()
+                        ];
                     }
                 }
             }
@@ -144,14 +169,19 @@ class YouTubeConverter implements ConverterInterface
             $video = $info['videos'][0];
             $title = $this->sanitizeFileName($video['title']);
             
-            $this->youtubeDl->setOptions(array_merge($this->options, [
-                'output' => $this->tempDir . '/' . $id . '.%(ext)s',
-                'extract-audio' => true,
-                'audio-format' => 'mp3',
-                'audio-quality' => 0
-            ]));
+            $options = new Options();
+            $options->setFFmpegLocation($this->ffmpegPath)
+                   ->setUrl($url)
+                   ->setExtractAudio(true)
+                   ->setAudioFormat('mp3')
+                   ->setAudioQuality(0)
+                   ->setOutput($this->tempDir . DIRECTORY_SEPARATOR . $id . '.%(ext)s');
+
+            foreach ($this->options as $key => $value) {
+                $options->set($key, $value);
+            }
             
-            $collection = $this->youtubeDl->download($url);
+            $collection = $this->youtubeDl->download($options);
             $downloadedVideo = $collection->getVideos()[0];
             
             if ($downloadedVideo->getError()) {
@@ -159,9 +189,9 @@ class YouTubeConverter implements ConverterInterface
             }
             
             $mp3File = $title . '.mp3';
-            $finalPath = $this->outputDir . '/' . $mp3File;
+            $finalPath = $this->outputDir . DIRECTORY_SEPARATOR . $mp3File;
             
-            if (!rename($this->tempDir . '/' . $id . '.mp3', $finalPath)) {
+            if (!rename($this->tempDir . DIRECTORY_SEPARATOR . $id . '.mp3', $finalPath)) {
                 throw ConverterException::conversionFailed('Failed to move MP3 file');
             }
             
@@ -179,12 +209,20 @@ class YouTubeConverter implements ConverterInterface
                 throw ConverterException::invalidOutputDirectory($dir);
             }
         }
+
+        if (!file_exists($binPath . DIRECTORY_SEPARATOR . 'yt-dlp')) {
+            throw ConverterException::missingDependency('yt-dlp');
+        }
+
+        if (!file_exists($binPath . DIRECTORY_SEPARATOR . 'ffmpeg')) {
+            throw ConverterException::missingDependency('ffmpeg');
+        }
     }
 
     private function getDefaultOptions(): array
     {
         return [
-            'format' => 'bestaudio/best',
+            'format' => 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio',
             'extract-audio' => true,
             'audio-format' => 'mp3',
             'audio-quality' => 0,
@@ -193,7 +231,6 @@ class YouTubeConverter implements ConverterInterface
             'ignore-errors' => true,
             'no-warnings' => true,
             'quiet' => true,
-            'extract-audio' => true,
             'add-metadata' => true,
             'embed-thumbnail' => true,
             'no-mtime' => true
@@ -206,5 +243,29 @@ class YouTubeConverter implements ConverterInterface
         $filename = trim($filename);
         $filename = preg_replace('/\s+/', '_', $filename);
         return $filename;
+    }
+
+    private function cleanupTempFiles(string $id): void
+    {
+        $patterns = [
+            $this->tempDir . DIRECTORY_SEPARATOR . $id . '.*',
+            $this->tempDir . DIRECTORY_SEPARATOR . '*.webm',
+            $this->tempDir . DIRECTORY_SEPARATOR . '*.m4a',
+            $this->tempDir . DIRECTORY_SEPARATOR . '*.opus',
+            $this->tempDir . DIRECTORY_SEPARATOR . '*.mp4',
+            $this->tempDir . DIRECTORY_SEPARATOR . '*.part',
+            $this->tempDir . DIRECTORY_SEPARATOR . '*.ytdl'
+        ];
+
+        foreach ($patterns as $pattern) {
+            $files = glob($pattern);
+            if ($files) {
+                foreach ($files as $file) {
+                    if (is_file($file)) {
+                        @unlink($file);
+                    }
+                }
+            }
+        }
     }
 } 
