@@ -1,6 +1,6 @@
 {
   "name": "@darkwob/youtube-mp3-converter",
-  "version": "1.0.0-beta",
+  "version": "1.0.0",
   "description": "A powerful YouTube to MP3 converter with playlist support",
   "main": "index.php",
   "scripts": {
