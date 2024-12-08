@@ -4,7 +4,7 @@
 ![Status](https://img.shields.io/badge/Status-Beta-yellow)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-A powerful YouTube to MP3 converter that supports both YouTube and YouTube Music, including playlist functionality. This project is currently in **BETA** stage.
+A powerful YouTube to MP3 converter that supports both YouTube and YouTube Music, including playlist functionality.
 
 ## ✨ Features
 
@@ -26,9 +26,40 @@ composer require darkwob/youtube-mp3-converter
 ### Basic Usage
 
 ```php
+use Darkwob\YoutubeMp3Converter\Converter\YouTubeConverter;
 use Darkwob\YoutubeMp3Converter\Progress\FileProgress;
 
 // Initialize progress tracker
+$progress = new FileProgress(__DIR__ . '/progress');
+
+// Initialize converter
+$converter = new YouTubeConverter(
+    __DIR__ . '/bin',           // Path to yt-dlp and ffmpeg binaries
+    __DIR__ . '/downloads',     // Output directory for MP3 files
+    __DIR__ . '/temp',          // Temporary directory for downloads
+    $progress                   // Progress tracker instance
+);
+
+// Convert a video
+try {
+    $result = $converter->processVideo('https://www.youtube.com/watch?v=VIDEO_ID');
+    
+    if ($result['success']) {
+        foreach ($result['results'] as $video) {
+            echo "Converted: {$video['title']}\n";
+            echo "File: {$video['file']}\n";
+        }
+    }
+} catch (ConverterException $e) {
+    echo "Error: " . $e->getMessage();
+}
+```
+
+### Progress Tracking
+
+```php
+use Darkwob\YoutubeMp3Converter\Progress\FileProgress;
+
 $progress = new FileProgress(__DIR__ . '/progress');
 
 // Update progress
@@ -46,24 +77,66 @@ $progress->delete('video123');
 $progress->cleanup(3600);
 ```
 
-### Error Handling
+### Web Interface Demo
 
-```php
-use Darkwob\YoutubeMp3Converter\Progress\FileProgress;
-use Darkwob\YoutubeMp3Converter\Progress\Exceptions\ProgressException;
+The package includes a complete web interface demo in the `demo` directory. To use it:
 
-try {
-    $progress = new FileProgress('/invalid/path');
-} catch (ProgressException $e) {
-    echo "Error: " . $e->getMessage();
-}
-```
+1. Copy the `demo` directory to your web server
+2. Install dependencies:
+   ```bash
+   composer install
+   ```
+3. Download required binaries:
+   - Download [yt-dlp](https://github.com/yt-dlp/yt-dlp) and place it in `demo/bin`
+   - Download [FFmpeg](https://ffmpeg.org/) and place it in `demo/bin`
+4. Make sure these directories are writable:
+   - `demo/downloads`
+   - `demo/temp`
+   - `demo/progress`
+5. Access the demo through your web browser
 
 ## 🔧 Requirements
 
 - PHP >= 7.4
 - JSON extension
-- Write permissions for progress directory
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+- [FFmpeg](https://ffmpeg.org/)
+- Write permissions for output directories
+
+## 🛠️ Configuration
+
+The converter accepts additional options in its constructor:
+
+```php
+$options = [
+    'format' => 'bestaudio/best',
+    'audio-quality' => 0, // 0 (best) to 9 (worst)
+    'embed-thumbnail' => true,
+    'add-metadata' => true
+];
+
+$converter = new YouTubeConverter($binPath, $outputDir, $tempDir, $progress, $options);
+```
+
+## 🔒 Error Handling
+
+The package uses custom exceptions for different error cases:
+
+```php
+use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
+
+try {
+    $result = $converter->processVideo($url);
+} catch (ConverterException $e) {
+    switch (true) {
+        case $e instanceof ConverterException:
+            echo "Converter error: " . $e->getMessage();
+            break;
+        default:
+            echo "Unexpected error: " . $e->getMessage();
+    }
+}
+```
 
 ## 📝 License
 
