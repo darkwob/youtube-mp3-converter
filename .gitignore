@@ -1,0 +1,31 @@
+# Binary files and directories
+bin/*.exe
+bin/*.dll
+downloads/*
+temp/*
+progress/*
+
+# Project specific
+*.mp3
+*.webm
+*.opus
+*.m4a
+*.mp4
+*.part
+*.ytdl
+*.temp
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# IDE specific
+.vscode/
+.idea/
+*.sublime-*
+
+# Keep directories but ignore contents
+!downloads/.gitkeep
+!temp/.gitkeep
+!progress/.gitkeep
+!bin/.gitkeep 

@@ -1,0 +1,19 @@
+includes:
+	- vendor/phpstan/phpstan-phpunit/extension.neon
+	- vendor/phpstan/phpstan-strict-rules/rules.neon
+	- phpstan-baseline.php
+
+parameters:
+	bootstrapFiles:
+		- vendor/bin/.phpunit/phpunit/vendor/autoload.php
+	paths:
+		- src/
+		- tests/
+	tmpDir: %currentWorkingDirectory%/.phpstan
+	level: 8
+	inferPrivatePropertyTypeFromConstructor: true
+	checkMissingIterableValueType: true
+	checkGenericClassInNonGenericObjectType: true
+	checkUninitializedProperties: true
+	checkBenevolentUnionTypes: true
+	reportAlwaysTrueInLastCondition: true
