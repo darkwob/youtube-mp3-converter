@@ -1,3 +1,7 @@
+# Dependencies
+/vendor/
+composer.lock
+
 # Binary files and directories
 bin/*.exe
 bin/*.dll
@@ -26,7 +30,6 @@ Thumbs.db
 *.sublime-*
 
 # Testing and development
-/vendor/
 /coverage/
 /coverage.txt
 .phpunit.result.cache

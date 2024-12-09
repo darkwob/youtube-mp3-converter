@@ -6,11 +6,12 @@ use Darkwob\YoutubeMp3Converter\Converter\Interfaces\ConverterInterface;
 use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
 use Darkwob\YoutubeMp3Converter\Progress\Interfaces\ProgressInterface;
 use Darkwob\YoutubeMp3Converter\Converter\Options\ConverterOptions;
-use Symfony\Component\Process\Process;
-use Monolog\Logger;
-use Monolog\Handler\StreamHandler;
-use GuzzleHttp\Client;
 
+/**
+ * YouTube to MP3 Converter
+ * 
+ * @package Darkwob\YoutubeMp3Converter
+ */
 class YouTubeConverter implements ConverterInterface
 {
     private string $binPath;
@@ -18,8 +19,6 @@ class YouTubeConverter implements ConverterInterface
     private string $tempPath;
     private ProgressInterface $progress;
     private ?ConverterOptions $options;
-    private Logger $logger;
-    private Client $httpClient;
 
     public function __construct(
         string $binPath,
@@ -35,16 +34,6 @@ class YouTubeConverter implements ConverterInterface
         $this->tempPath = rtrim($tempPath, '/');
         $this->progress = $progress;
         $this->options = $options ?? new ConverterOptions();
-        
-        // Initialize logger
-        $this->logger = new Logger('youtube-converter');
-        $this->logger->pushHandler(new StreamHandler($this->tempPath . '/converter.log', Logger::DEBUG));
-        
-        // Initialize HTTP client
-        $this->httpClient = new Client([
-            'timeout' => 30,
-            'verify' => true
-        ]);
 
         $this->checkDependencies();
     }
@@ -52,8 +41,6 @@ class YouTubeConverter implements ConverterInterface
     public function processVideo(string $url): array
     {
         try {
-            $this->logger->info('Starting video processing', ['url' => $url]);
-            
             // Validate URL
             if (!filter_var($url, FILTER_VALIDATE_URL)) {
                 throw ConverterException::invalidUrl($url);
@@ -85,12 +72,6 @@ class YouTubeConverter implements ConverterInterface
             
             // Update final progress
             $this->progress->update($id, 'completed', 100, 'Conversion completed');
-            
-            $this->logger->info('Video processing completed', [
-                'url' => $url,
-                'id' => $id,
-                'output' => $result
-            ]);
 
             return [
                 'success' => true,
@@ -99,17 +80,10 @@ class YouTubeConverter implements ConverterInterface
             ];
 
         } catch (ConverterException $e) {
-            $this->logger->error('Conversion error', [
-                'url' => $url,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            
             if (isset($id)) {
                 $this->progress->update($id, 'error', 0, $e->getMessage());
                 $this->cleanup($id);
             }
-            
             throw $e;
         }
     }
@@ -117,9 +91,7 @@ class YouTubeConverter implements ConverterInterface
     public function getVideoInfo(string $url): array
     {
         try {
-            $this->logger->debug('Getting video info', ['url' => $url]);
-            
-            $process = new Process([
+            $process = new \Symfony\Component\Process\Process([
                 $this->binPath . '/yt-dlp',
                 '--dump-json',
                 '--no-playlist',
@@ -140,10 +112,6 @@ class YouTubeConverter implements ConverterInterface
             return $info;
 
         } catch (\Exception $e) {
-            $this->logger->error('Error getting video info', [
-                'url' => $url,
-                'error' => $e->getMessage()
-            ]);
             throw $e;
         }
     }
@@ -151,11 +119,9 @@ class YouTubeConverter implements ConverterInterface
     public function downloadVideo(string $url, string $id): string
     {
         try {
-            $this->logger->debug('Downloading video', ['url' => $url, 'id' => $id]);
-            
             $outputFile = $this->tempPath . '/' . $id . '.%(ext)s';
             
-            $process = new Process([
+            $process = new \Symfony\Component\Process\Process([
                 $this->binPath . '/yt-dlp',
                 '--format', $this->options->getVideoFormat(),
                 '--output', $outputFile,
@@ -177,11 +143,6 @@ class YouTubeConverter implements ConverterInterface
             return $files[0];
 
         } catch (\Exception $e) {
-            $this->logger->error('Error downloading video', [
-                'url' => $url,
-                'id' => $id,
-                'error' => $e->getMessage()
-            ]);
             throw $e;
         }
     }
@@ -189,11 +150,9 @@ class YouTubeConverter implements ConverterInterface
     private function convertToAudio(string $inputFile, array $videoInfo): array
     {
         try {
-            $this->logger->debug('Converting to audio', ['input' => $inputFile]);
-            
             $outputFile = $this->outputPath . '/' . $this->generateFilename($videoInfo);
             
-            $process = new Process([
+            $process = new \Symfony\Component\Process\Process([
                 $this->binPath . '/ffmpeg',
                 '-i', $inputFile,
                 '-vn',
@@ -208,14 +167,6 @@ class YouTubeConverter implements ConverterInterface
                 throw ConverterException::conversionFailed($inputFile, $process->getErrorOutput());
             }
             
-            if ($this->options->shouldEmbedThumbnail() && !empty($videoInfo['thumbnail'])) {
-                $this->embedThumbnail($outputFile, $videoInfo['thumbnail']);
-            }
-            
-            if ($this->options->hasMetadata()) {
-                $this->setMetadata($outputFile, $videoInfo);
-            }
-            
             return [
                 'title' => $videoInfo['title'] ?? basename($outputFile),
                 'file' => basename($outputFile),
@@ -225,10 +176,6 @@ class YouTubeConverter implements ConverterInterface
             ];
 
         } catch (\Exception $e) {
-            $this->logger->error('Error converting to audio', [
-                'input' => $inputFile,
-                'error' => $e->getMessage()
-            ]);
             throw $e;
         }
     }
@@ -266,76 +213,6 @@ class YouTubeConverter implements ConverterInterface
         return $filename . '.' . $this->options->getAudioFormat();
     }
 
-    private function embedThumbnail(string $audioFile, string $thumbnailUrl): void
-    {
-        try {
-            // Download thumbnail
-            $thumbnailFile = $this->tempPath . '/' . uniqid('thumb_', true) . '.jpg';
-            $response = $this->httpClient->get($thumbnailUrl);
-            file_put_contents($thumbnailFile, $response->getBody());
-
-            // Embed thumbnail
-            $process = new Process([
-                $this->binPath . '/ffmpeg',
-                '-i', $audioFile,
-                '-i', $thumbnailFile,
-                '-map', '0:0',
-                '-map', '1:0',
-                '-c', 'copy',
-                '-id3v2_version', '3',
-                '-metadata:s:v', 'title="Album cover"',
-                '-metadata:s:v', 'comment="Cover (front)"',
-                $audioFile . '.temp'
-            ]);
-
-            $process->run();
-
-            if ($process->isSuccessful()) {
-                rename($audioFile . '.temp', $audioFile);
-            }
-
-            // Cleanup
-            @unlink($thumbnailFile);
-
-        } catch (\Exception $e) {
-            $this->logger->warning('Failed to embed thumbnail', [
-                'file' => $audioFile,
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-
-    private function setMetadata(string $audioFile, array $videoInfo): void
-    {
-        try {
-            $metadata = $this->options->getMetadata();
-            $metadataArgs = [];
-
-            foreach ($metadata as $key => $value) {
-                $metadataArgs[] = '-metadata';
-                $metadataArgs[] = $key . '=' . $value;
-            }
-
-            $process = new Process(array_merge([
-                $this->binPath . '/ffmpeg',
-                '-i', $audioFile,
-                '-c', 'copy'
-            ], $metadataArgs, [$audioFile . '.temp']));
-
-            $process->run();
-
-            if ($process->isSuccessful()) {
-                rename($audioFile . '.temp', $audioFile);
-            }
-
-        } catch (\Exception $e) {
-            $this->logger->warning('Failed to set metadata', [
-                'file' => $audioFile,
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-
     private function cleanup(string $id): void
     {
         try {
@@ -346,10 +223,7 @@ class YouTubeConverter implements ConverterInterface
                 @unlink($file);
             }
         } catch (\Exception $e) {
-            $this->logger->warning('Cleanup failed', [
-                'id' => $id,
-                'error' => $e->getMessage()
-            ]);
+            // Cleanup errors can be ignored
         }
     }
 } 
