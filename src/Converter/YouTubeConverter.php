@@ -6,6 +6,7 @@ use Darkwob\YoutubeMp3Converter\Converter\Interfaces\ConverterInterface;
 use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
 use Darkwob\YoutubeMp3Converter\Progress\Interfaces\ProgressInterface;
 use Darkwob\YoutubeMp3Converter\Converter\Options\ConverterOptions;
+use Symfony\Component\Process\Process;
 
 /**
  * YouTube to MP3 Converter
@@ -91,7 +92,7 @@ class YouTubeConverter implements ConverterInterface
     public function getVideoInfo(string $url): array
     {
         try {
-            $process = new \Symfony\Component\Process\Process([
+            $process = new Process([
                 $this->binPath . '/yt-dlp',
                 '--dump-json',
                 '--no-playlist',
@@ -121,7 +122,7 @@ class YouTubeConverter implements ConverterInterface
         try {
             $outputFile = $this->tempPath . '/' . $id . '.%(ext)s';
             
-            $process = new \Symfony\Component\Process\Process([
+            $process = new Process([
                 $this->binPath . '/yt-dlp',
                 '--format', $this->options->getVideoFormat(),
                 '--output', $outputFile,
@@ -152,7 +153,7 @@ class YouTubeConverter implements ConverterInterface
         try {
             $outputFile = $this->outputPath . '/' . $this->generateFilename($videoInfo);
             
-            $process = new \Symfony\Component\Process\Process([
+            $process = new Process([
                 $this->binPath . '/ffmpeg',
                 '-i', $inputFile,
                 '-vn',
