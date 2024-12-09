@@ -5,29 +5,29 @@ namespace Darkwob\YoutubeMp3Converter\Converter\Interfaces;
 interface ConverterInterface
 {
     /**
-     * Video işleme
+     * Process video for conversion
      * 
-     * @param string $url Video URL'i
-     * @return array İşlem sonucu
+     * @param string $url Video URL
+     * @return array Processing result
      * @throws \Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException
      */
     public function processVideo(string $url): array;
 
     /**
-     * Video bilgilerini getir
+     * Get video information
      * 
-     * @param string $url Video URL'i
-     * @return array Video bilgileri
+     * @param string $url Video URL
+     * @return array Video information
      * @throws \Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException
      */
     public function getVideoInfo(string $url): array;
 
     /**
-     * Video indirme
+     * Download video
      * 
-     * @param string $url Video URL'i
+     * @param string $url Video URL
      * @param string $id Video ID
-     * @return string İndirilen dosya yolu
+     * @return string Downloaded file path
      * @throws \Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException
      */
     public function downloadVideo(string $url, string $id): string;

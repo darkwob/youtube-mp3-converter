@@ -25,8 +25,22 @@ Thumbs.db
 .idea/
 *.sublime-*
 
+# Testing and development
+/vendor/
+/coverage/
+/coverage.txt
+.phpunit.result.cache
+.php_cs.cache
+.php-cs-fixer.cache
+.phpstan.cache
+
 # Keep directories but ignore contents
 !downloads/.gitkeep
 !temp/.gitkeep
 !progress/.gitkeep
-!bin/.gitkeep 
+!bin/.gitkeep
+
+# Environment files
+.env
+.env.local
+.env.*.local 

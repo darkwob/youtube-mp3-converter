@@ -5,267 +5,351 @@ namespace Darkwob\YoutubeMp3Converter\Converter;
 use Darkwob\YoutubeMp3Converter\Converter\Interfaces\ConverterInterface;
 use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
 use Darkwob\YoutubeMp3Converter\Progress\Interfaces\ProgressInterface;
-use YoutubeDl\Options;
-use YoutubeDl\YoutubeDl;
-use YoutubeDl\Exception\ExecutableNotFoundException;
-use YoutubeDl\Exception\YoutubeDlException;
+use Darkwob\YoutubeMp3Converter\Converter\Options\ConverterOptions;
+use Symfony\Component\Process\Process;
+use Monolog\Logger;
+use Monolog\Handler\StreamHandler;
+use GuzzleHttp\Client;
 
 class YouTubeConverter implements ConverterInterface
 {
-    private YoutubeDl $youtubeDl;
+    private string $binPath;
+    private string $outputPath;
+    private string $tempPath;
     private ProgressInterface $progress;
-    private string $outputDir;
-    private string $tempDir;
-    private array $options;
-    private string $ffmpegPath;
+    private ?ConverterOptions $options;
+    private Logger $logger;
+    private Client $httpClient;
 
     public function __construct(
         string $binPath,
-        string $outputDir,
-        string $tempDir,
+        string $outputPath,
+        string $tempPath,
         ProgressInterface $progress,
-        array $options = []
+        ?ConverterOptions $options = null
     ) {
-        $this->validatePaths($binPath, $outputDir, $tempDir);
+        $this->validatePaths($binPath, $outputPath, $tempPath);
         
-        $this->youtubeDl = new YoutubeDl();
-        $this->youtubeDl->setBinPath($binPath . DIRECTORY_SEPARATOR . 'yt-dlp');
-        $this->ffmpegPath = $binPath . DIRECTORY_SEPARATOR . 'ffmpeg';
+        $this->binPath = rtrim($binPath, '/');
+        $this->outputPath = rtrim($outputPath, '/');
+        $this->tempPath = rtrim($tempPath, '/');
         $this->progress = $progress;
-        $this->outputDir = rtrim($outputDir, '/\\');
-        $this->tempDir = rtrim($tempDir, '/\\');
-        $this->options = array_merge($this->getDefaultOptions(), $options);
+        $this->options = $options ?? new ConverterOptions();
+        
+        // Initialize logger
+        $this->logger = new Logger('youtube-converter');
+        $this->logger->pushHandler(new StreamHandler($this->tempPath . '/converter.log', Logger::DEBUG));
+        
+        // Initialize HTTP client
+        $this->httpClient = new Client([
+            'timeout' => 30,
+            'verify' => true
+        ]);
+
+        $this->checkDependencies();
     }
 
     public function processVideo(string $url): array
     {
         try {
+            $this->logger->info('Starting video processing', ['url' => $url]);
+            
+            // Validate URL
+            if (!filter_var($url, FILTER_VALIDATE_URL)) {
+                throw ConverterException::invalidUrl($url);
+            }
+
+            // Generate unique ID
+            $id = uniqid('video_', true);
+            
+            // Update progress
+            $this->progress->update($id, 'starting', 0, 'Initializing conversion');
+            
+            // Get video info
             $info = $this->getVideoInfo($url);
             
-            if (empty($info['videos'])) {
-                throw ConverterException::videoInfoFailed();
-            }
+            // Update progress
+            $this->progress->update($id, 'downloading', 25, 'Downloading video');
             
-            $results = [];
-            $totalVideos = count($info['videos']);
+            // Download video
+            $outputFile = $this->downloadVideo($url, $id);
             
-            foreach ($info['videos'] as $index => $video) {
-                $id = $video['id'];
-                $currentVideo = $index + 1;
-                
-                try {
-                    $this->progress->update($id, 'downloading', 0, "Video {$currentVideo}/{$totalVideos} indiriliyor...");
-                    $mp3Path = $this->downloadVideo($video['url'], $id);
-                    
-                    if (!file_exists($this->outputDir . DIRECTORY_SEPARATOR . $mp3Path)) {
-                        throw ConverterException::conversionFailed();
-                    }
-                    
-                    $results[] = [
-                        'id' => $id,
-                        'title' => $video['title'],
-                        'status' => 'success',
-                        'file' => $mp3Path
-                    ];
-                    
-                    $this->progress->update($id, 'completed', 100, "Video başarıyla dönüştürüldü");
-                    $this->cleanupTempFiles($id);
-                    
-                } catch (\Exception $e) {
-                    $this->progress->update($id, 'error', -1, $e->getMessage());
-                    $results[] = [
-                        'id' => $id,
-                        'title' => $video['title'],
-                        'status' => 'error',
-                        'message' => $e->getMessage()
-                    ];
-                    $this->cleanupTempFiles($id);
-                }
-            }
+            // Update progress
+            $this->progress->update($id, 'converting', 75, 'Converting to audio');
             
+            // Process the video
+            $result = $this->convertToAudio($outputFile, $info);
+            
+            // Cleanup temporary files
+            $this->cleanup($id);
+            
+            // Update final progress
+            $this->progress->update($id, 'completed', 100, 'Conversion completed');
+            
+            $this->logger->info('Video processing completed', [
+                'url' => $url,
+                'id' => $id,
+                'output' => $result
+            ]);
+
             return [
                 'success' => true,
-                'is_playlist' => $info['is_playlist'],
-                'playlist_title' => $info['playlist_title'] ?? '',
-                'total_videos' => $totalVideos,
-                'processed_videos' => count($results),
-                'results' => $results
+                'id' => $id,
+                'results' => $result
             ];
+
+        } catch (ConverterException $e) {
+            $this->logger->error('Conversion error', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             
-        } catch (\Exception $e) {
-            throw ConverterException::videoInfoFailed($e->getMessage());
+            if (isset($id)) {
+                $this->progress->update($id, 'error', 0, $e->getMessage());
+                $this->cleanup($id);
+            }
+            
+            throw $e;
         }
     }
 
     public function getVideoInfo(string $url): array
     {
         try {
-            $options = new Options();
-            $options->setFFmpegLocation($this->ffmpegPath);
-            foreach ($this->options as $key => $value) {
-                $options->set($key, $value);
+            $this->logger->debug('Getting video info', ['url' => $url]);
+            
+            $process = new Process([
+                $this->binPath . '/yt-dlp',
+                '--dump-json',
+                '--no-playlist',
+                $url
+            ]);
+            
+            $process->run();
+            
+            if (!$process->isSuccessful()) {
+                throw ConverterException::videoInfoFailed($process->getErrorOutput());
             }
             
-            $collection = $this->youtubeDl->download($options->setUrl($url));
-            
-            $videos = [];
-            $isPlaylist = false;
-            $playlistTitle = '';
-            
-            foreach ($collection->getVideos() as $video) {
-                if (!$video->getError()) {
-                    $videos[] = [
-                        'id' => $video->getId(),
-                        'title' => $video->getTitle(),
-                        'url' => $url,
-                        'duration' => $video->getDuration()
-                    ];
-                    
-                    if ($video->getPlaylist()) {
-                        $isPlaylist = true;
-                        $playlistTitle = $video->getPlaylist();
-                    }
-                }
+            $info = json_decode($process->getOutput(), true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw ConverterException::videoInfoFailed('Invalid JSON response');
             }
             
-            if (empty($videos)) {
-                // İkinci deneme: Farklı format seçenekleriyle
-                $options->set('format', 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio');
-                $collection = $this->youtubeDl->download($options);
-                
-                foreach ($collection->getVideos() as $video) {
-                    if (!$video->getError()) {
-                        $videos[] = [
-                            'id' => $video->getId(),
-                            'title' => $video->getTitle(),
-                            'url' => $url,
-                            'duration' => $video->getDuration()
-                        ];
-                    }
-                }
-            }
-            
-            return [
-                'is_playlist' => $isPlaylist,
-                'playlist_title' => $playlistTitle,
-                'videos' => $videos
-            ];
-            
-        } catch (ExecutableNotFoundException $e) {
-            throw ConverterException::missingDependency('yt-dlp executable not found');
-        } catch (YoutubeDlException $e) {
-            throw ConverterException::videoInfoFailed($e->getMessage());
+            return $info;
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error getting video info', [
+                'url' => $url,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
         }
     }
 
     public function downloadVideo(string $url, string $id): string
     {
         try {
-            $info = $this->getVideoInfo($url);
-            if (empty($info['videos'])) {
-                throw ConverterException::downloadFailed('No video information found');
+            $this->logger->debug('Downloading video', ['url' => $url, 'id' => $id]);
+            
+            $outputFile = $this->tempPath . '/' . $id . '.%(ext)s';
+            
+            $process = new Process([
+                $this->binPath . '/yt-dlp',
+                '--format', $this->options->getVideoFormat(),
+                '--output', $outputFile,
+                $url
+            ]);
+            
+            $process->run();
+            
+            if (!$process->isSuccessful()) {
+                throw ConverterException::downloadFailed($url, $process->getErrorOutput());
             }
             
-            $video = $info['videos'][0];
-            $title = $this->sanitizeFileName($video['title']);
+            // Find the downloaded file
+            $files = glob($this->tempPath . '/' . $id . '.*');
+            if (empty($files)) {
+                throw ConverterException::downloadFailed($url, 'Output file not found');
+            }
             
-            $options = new Options();
-            $options->setFFmpegLocation($this->ffmpegPath)
-                   ->setUrl($url)
-                   ->setExtractAudio(true)
-                   ->setAudioFormat('mp3')
-                   ->setAudioQuality(0)
-                   ->setOutput($this->tempDir . DIRECTORY_SEPARATOR . $id . '.%(ext)s');
+            return $files[0];
 
-            foreach ($this->options as $key => $value) {
-                $options->set($key, $value);
-            }
-            
-            $collection = $this->youtubeDl->download($options);
-            $downloadedVideo = $collection->getVideos()[0];
-            
-            if ($downloadedVideo->getError()) {
-                throw ConverterException::downloadFailed($downloadedVideo->getError());
-            }
-            
-            $mp3File = $title . '.mp3';
-            $finalPath = $this->outputDir . DIRECTORY_SEPARATOR . $mp3File;
-            
-            if (!rename($this->tempDir . DIRECTORY_SEPARATOR . $id . '.mp3', $finalPath)) {
-                throw ConverterException::conversionFailed('Failed to move MP3 file');
-            }
-            
-            return $mp3File;
-            
         } catch (\Exception $e) {
-            throw ConverterException::downloadFailed($e->getMessage());
+            $this->logger->error('Error downloading video', [
+                'url' => $url,
+                'id' => $id,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
         }
     }
 
-    private function validatePaths(string $binPath, string $outputDir, string $tempDir): void
+    private function convertToAudio(string $inputFile, array $videoInfo): array
     {
-        foreach ([$binPath, $outputDir, $tempDir] as $dir) {
-            if (!is_dir($dir) && !mkdir($dir, 0777, true)) {
-                throw ConverterException::invalidOutputDirectory($dir);
+        try {
+            $this->logger->debug('Converting to audio', ['input' => $inputFile]);
+            
+            $outputFile = $this->outputPath . '/' . $this->generateFilename($videoInfo);
+            
+            $process = new Process([
+                $this->binPath . '/ffmpeg',
+                '-i', $inputFile,
+                '-vn',
+                '-acodec', $this->options->getAudioFormat(),
+                '-q:a', (string)$this->options->getAudioQuality(),
+                $outputFile
+            ]);
+            
+            $process->run();
+            
+            if (!$process->isSuccessful()) {
+                throw ConverterException::conversionFailed($inputFile, $process->getErrorOutput());
+            }
+            
+            if ($this->options->shouldEmbedThumbnail() && !empty($videoInfo['thumbnail'])) {
+                $this->embedThumbnail($outputFile, $videoInfo['thumbnail']);
+            }
+            
+            if ($this->options->hasMetadata()) {
+                $this->setMetadata($outputFile, $videoInfo);
+            }
+            
+            return [
+                'title' => $videoInfo['title'] ?? basename($outputFile),
+                'file' => basename($outputFile),
+                'size' => filesize($outputFile),
+                'duration' => $videoInfo['duration'] ?? 0,
+                'format' => $this->options->getAudioFormat()
+            ];
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error converting to audio', [
+                'input' => $inputFile,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+    }
+
+    private function validatePaths(string $binPath, string $outputPath, string $tempPath): void
+    {
+        // Validate and create directories if needed
+        foreach ([$binPath, $outputPath, $tempPath] as $path) {
+            if (!is_dir($path) && !mkdir($path, 0777, true)) {
+                throw ConverterException::invalidOutputDirectory($path);
             }
         }
+    }
 
-        if (!file_exists($binPath . DIRECTORY_SEPARATOR . 'yt-dlp')) {
-            throw ConverterException::missingDependency('yt-dlp');
+    private function checkDependencies(): void
+    {
+        // Check yt-dlp
+        $ytdlp = $this->binPath . '/yt-dlp';
+        if (!file_exists($ytdlp)) {
+            throw ConverterException::missingDependency('yt-dlp not found in ' . $this->binPath);
         }
 
-        if (!file_exists($binPath . DIRECTORY_SEPARATOR . 'ffmpeg')) {
-            throw ConverterException::missingDependency('ffmpeg');
+        // Check ffmpeg
+        $ffmpeg = $this->binPath . '/ffmpeg';
+        if (!file_exists($ffmpeg)) {
+            throw ConverterException::missingDependency('ffmpeg not found in ' . $this->binPath);
         }
     }
 
-    private function getDefaultOptions(): array
+    private function generateFilename(array $videoInfo): string
     {
-        return [
-            'format' => 'bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio',
-            'extract-audio' => true,
-            'audio-format' => 'mp3',
-            'audio-quality' => 0,
-            'no-playlist' => false,
-            'yes-playlist' => true,
-            'ignore-errors' => true,
-            'no-warnings' => true,
-            'quiet' => true,
-            'add-metadata' => true,
-            'embed-thumbnail' => true,
-            'no-mtime' => true
-        ];
+        $filename = $videoInfo['title'] ?? uniqid('audio_', true);
+        $filename = preg_replace('/[^a-zA-Z0-9]+/', '_', $filename);
+        $filename = trim($filename, '_');
+        return $filename . '.' . $this->options->getAudioFormat();
     }
 
-    private function sanitizeFileName(string $filename): string
+    private function embedThumbnail(string $audioFile, string $thumbnailUrl): void
     {
-        $filename = preg_replace('/[^a-zA-Z0-9\-_\s]/', '', $filename);
-        $filename = trim($filename);
-        $filename = preg_replace('/\s+/', '_', $filename);
-        return $filename;
+        try {
+            // Download thumbnail
+            $thumbnailFile = $this->tempPath . '/' . uniqid('thumb_', true) . '.jpg';
+            $response = $this->httpClient->get($thumbnailUrl);
+            file_put_contents($thumbnailFile, $response->getBody());
+
+            // Embed thumbnail
+            $process = new Process([
+                $this->binPath . '/ffmpeg',
+                '-i', $audioFile,
+                '-i', $thumbnailFile,
+                '-map', '0:0',
+                '-map', '1:0',
+                '-c', 'copy',
+                '-id3v2_version', '3',
+                '-metadata:s:v', 'title="Album cover"',
+                '-metadata:s:v', 'comment="Cover (front)"',
+                $audioFile . '.temp'
+            ]);
+
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                rename($audioFile . '.temp', $audioFile);
+            }
+
+            // Cleanup
+            @unlink($thumbnailFile);
+
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to embed thumbnail', [
+                'file' => $audioFile,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 
-    private function cleanupTempFiles(string $id): void
+    private function setMetadata(string $audioFile, array $videoInfo): void
     {
-        $patterns = [
-            $this->tempDir . DIRECTORY_SEPARATOR . $id . '.*',
-            $this->tempDir . DIRECTORY_SEPARATOR . '*.webm',
-            $this->tempDir . DIRECTORY_SEPARATOR . '*.m4a',
-            $this->tempDir . DIRECTORY_SEPARATOR . '*.opus',
-            $this->tempDir . DIRECTORY_SEPARATOR . '*.mp4',
-            $this->tempDir . DIRECTORY_SEPARATOR . '*.part',
-            $this->tempDir . DIRECTORY_SEPARATOR . '*.ytdl'
-        ];
+        try {
+            $metadata = $this->options->getMetadata();
+            $metadataArgs = [];
 
-        foreach ($patterns as $pattern) {
+            foreach ($metadata as $key => $value) {
+                $metadataArgs[] = '-metadata';
+                $metadataArgs[] = $key . '=' . $value;
+            }
+
+            $process = new Process(array_merge([
+                $this->binPath . '/ffmpeg',
+                '-i', $audioFile,
+                '-c', 'copy'
+            ], $metadataArgs, [$audioFile . '.temp']));
+
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                rename($audioFile . '.temp', $audioFile);
+            }
+
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to set metadata', [
+                'file' => $audioFile,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    private function cleanup(string $id): void
+    {
+        try {
+            $pattern = $this->tempPath . '/' . $id . '.*';
             $files = glob($pattern);
-            if ($files) {
-                foreach ($files as $file) {
-                    if (is_file($file)) {
-                        @unlink($file);
-                    }
-                }
+            
+            foreach ($files as $file) {
+                @unlink($file);
             }
+        } catch (\Exception $e) {
+            $this->logger->warning('Cleanup failed', [
+                'id' => $id,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 } 
