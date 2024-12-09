@@ -2,11 +2,22 @@
     "name": "darkwob/youtube-mp3-converter",
     "description": "A powerful YouTube to MP3 converter with playlist support and progress tracking",
     "type": "library",
+    "keywords": [
+        "youtube",
+        "mp3",
+        "converter",
+        "playlist",
+        "downloader",
+        "youtube-music",
+        "audio-converter"
+    ],
+    "homepage": "https://github.com/darkwob/youtube-mp3-converter",
     "license": "MIT",
     "authors": [
         {
             "name": "darkwob",
-            "email": "sadiksefa@hotmail.com.tr"
+            "email": "sadiksefa@hotmail.com.tr",
+            "role": "Developer"
         }
     ],
     "require": {
@@ -27,6 +38,11 @@
     },
     "suggest": {
         "ext-fileinfo": "Required for file type detection",
-        "ext-curl": "Required for downloading videos"
+        "ext-curl": "Required for downloading videos",
+        "ext-redis": "Required for Redis progress tracking"
+    },
+    "support": {
+        "issues": "https://github.com/darkwob/youtube-mp3-converter/issues",
+        "source": "https://github.com/darkwob/youtube-mp3-converter"
     }
 } 
