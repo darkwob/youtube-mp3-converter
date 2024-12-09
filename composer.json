@@ -1,6 +1,7 @@
 {
     "name": "darkwob/youtube-mp3-converter",
     "description": "A powerful YouTube to MP3 converter with playlist support and progress tracking",
+    "version": "1.0.3",
     "type": "library",
     "keywords": [
         "youtube",
