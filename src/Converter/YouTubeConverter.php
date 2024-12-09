@@ -7,6 +7,7 @@ use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
 use Darkwob\YoutubeMp3Converter\Progress\Interfaces\ProgressInterface;
 use Darkwob\YoutubeMp3Converter\Converter\Options\ConverterOptions;
 use Symfony\Component\Process\Process;
+use GuzzleHttp\Client;
 
 /**
  * YouTube to MP3 Converter
@@ -20,6 +21,7 @@ class YouTubeConverter implements ConverterInterface
     private string $tempPath;
     private ProgressInterface $progress;
     private ?ConverterOptions $options;
+    private Client $httpClient;
 
     public function __construct(
         string $binPath,
@@ -35,6 +37,12 @@ class YouTubeConverter implements ConverterInterface
         $this->tempPath = rtrim($tempPath, '/');
         $this->progress = $progress;
         $this->options = $options ?? new ConverterOptions();
+        
+        // Initialize HTTP client
+        $this->httpClient = new Client([
+            'timeout' => 30,
+            'verify' => true
+        ]);
 
         $this->checkDependencies();
     }
@@ -167,6 +175,16 @@ class YouTubeConverter implements ConverterInterface
             if (!$process->isSuccessful()) {
                 throw ConverterException::conversionFailed($inputFile, $process->getErrorOutput());
             }
+
+            // Add thumbnail if enabled
+            if ($this->options->shouldEmbedThumbnail() && !empty($videoInfo['thumbnail'])) {
+                $this->embedThumbnail($outputFile, $videoInfo['thumbnail']);
+            }
+            
+            // Add metadata if enabled
+            if ($this->options->hasMetadata()) {
+                $this->setMetadata($outputFile, $videoInfo);
+            }
             
             return [
                 'title' => $videoInfo['title'] ?? basename($outputFile),
@@ -178,6 +196,70 @@ class YouTubeConverter implements ConverterInterface
 
         } catch (\Exception $e) {
             throw $e;
+        }
+    }
+
+    private function embedThumbnail(string $audioFile, string $thumbnailUrl): void
+    {
+        try {
+            // Download thumbnail
+            $thumbnailFile = $this->tempPath . '/' . uniqid('thumb_', true) . '.jpg';
+            $response = $this->httpClient->get($thumbnailUrl);
+            file_put_contents($thumbnailFile, $response->getBody());
+
+            // Embed thumbnail
+            $process = new Process([
+                $this->binPath . '/ffmpeg',
+                '-i', $audioFile,
+                '-i', $thumbnailFile,
+                '-map', '0:0',
+                '-map', '1:0',
+                '-c', 'copy',
+                '-id3v2_version', '3',
+                '-metadata:s:v', 'title="Album cover"',
+                '-metadata:s:v', 'comment="Cover (front)"',
+                $audioFile . '.temp'
+            ]);
+
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                rename($audioFile . '.temp', $audioFile);
+            }
+
+            // Cleanup
+            @unlink($thumbnailFile);
+
+        } catch (\Exception $e) {
+            // Thumbnail errors can be ignored
+        }
+    }
+
+    private function setMetadata(string $audioFile, array $videoInfo): void
+    {
+        try {
+            $metadata = $this->options->getMetadata();
+            $metadataArgs = [];
+
+            foreach ($metadata as $key => $value) {
+                $metadataArgs[] = '-metadata';
+                $metadataArgs[] = $key . '=' . $value;
+            }
+
+            $process = new Process(array_merge([
+                $this->binPath . '/ffmpeg',
+                '-i', $audioFile,
+                '-c', 'copy'
+            ], $metadataArgs, [$audioFile . '.temp']));
+
+            $process->run();
+
+            if ($process->isSuccessful()) {
+                rename($audioFile . '.temp', $audioFile);
+            }
+
+        } catch (\Exception $e) {
+            // Metadata errors can be ignored
         }
     }
 

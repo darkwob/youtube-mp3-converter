@@ -26,6 +26,7 @@
     "require": {
         "php": ">=7.4",
         "symfony/process": "^5.4|^6.0",
+        "guzzlehttp/guzzle": "^7.0",
         "ext-json": "*"
     },
     "suggest": {
