@@ -1,23 +1,21 @@
 # 🎵 YouTube to MP3 Converter
 
-![PHP Version](https://img.shields.io/badge/PHP-%3E%3D7.4-blue)
+![PHP Version](https://img.shields.io/badge/PHP-%3E%3D8.4-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-green)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-A powerful and feature-rich YouTube to MP3 converter library that supports both YouTube and YouTube Music, including playlist functionality, remote conversion, and extensive customization options.
+A powerful and feature-rich YouTube to MP3 converter library for PHP 8.4+ that supports YouTube video conversion with extensive customization options, progress tracking, and remote conversion capabilities.
 
 ## ✨ Key Features
 
-- 🎵 Convert YouTube videos to multiple audio formats
-- 📑 Full playlist support with customizable filters
-- 🎧 YouTube Music support
+- 🎵 Convert YouTube videos to multiple audio formats (MP3, AAC, FLAC, WAV, etc.)
 - 📊 Real-time progress tracking (File-based or Redis)
 - 🌐 Remote server conversion support
-- 🔒 Token-based security
-- 🎯 Clean and modern API
-- 🔄 Automatic file cleanup
-- 🛠️ Extensive configuration options
-- 🚀 Asynchronous processing support
+- 🔒 Clean and modern PHP 8.4+ API with readonly properties
+- 🛠️ Extensive configuration options (quality, metadata, thumbnails)
+- 🎯 ConversionResult objects for type-safe results
+- 🔄 Cross-platform compatibility (Windows, Linux, macOS)
+- 🚀 Robust error handling with specific exception types
 
 ## 🚀 Installation
 
@@ -27,9 +25,10 @@ composer require darkwob/youtube-mp3-converter
 
 ### Requirements
 
-- PHP >= 7.4
+- PHP >= 8.4 (required)
 - JSON extension
-- FFmpeg (optional, for advanced audio processing)
+- FFmpeg (required for audio conversion)
+- yt-dlp (required for video downloading)
 - Redis (optional, for Redis-based progress tracking)
 
 ## 💻 Basic Usage
@@ -38,29 +37,35 @@ composer require darkwob/youtube-mp3-converter
 
 ```php
 use Darkwob\YoutubeMp3Converter\Converter\YouTubeConverter;
+use Darkwob\YoutubeMp3Converter\Converter\Options\ConverterOptions;
 use Darkwob\YoutubeMp3Converter\Progress\FileProgress;
 
 // Initialize progress tracker
 $progress = new FileProgress(__DIR__ . '/progress');
 
-// Initialize converter
+// Configure conversion options
+$options = new ConverterOptions();
+$options->setAudioFormat('mp3')->setAudioQuality(0); // Highest quality
+
+// Initialize converter (5 parameters required)
 $converter = new YouTubeConverter(
     __DIR__ . '/bin',           // Binary path (yt-dlp, ffmpeg)
     __DIR__ . '/downloads',     // Output directory
-    __DIR__ . '/temp',         // Temporary directory
-    $progress                   // Progress tracker
+    __DIR__ . '/temp',          // Temporary directory
+    $progress,                  // Progress tracker
+    $options                    // Converter options
 );
 
 // Convert a video
 try {
     $result = $converter->processVideo('https://www.youtube.com/watch?v=VIDEO_ID');
     
-    if ($result['success']) {
-        foreach ($result['results'] as $video) {
-            echo "Converted: {$video['title']}\n";
-            echo "File: {$video['file']}\n";
-        }
-    }
+    echo "Converted: " . $result->getTitle() . "\n";
+    echo "File: " . $result->getOutputPath() . "\n";
+    echo "Format: " . $result->getFormat() . "\n";
+    echo "Size: " . round($result->getSize() / 1024 / 1024, 2) . " MB\n";
+    echo "Duration: " . round($result->getDuration() / 60, 2) . " minutes\n";
+    
 } catch (ConverterException $e) {
     echo "Error: " . $e->getMessage();
 }
@@ -74,19 +79,18 @@ use Darkwob\YoutubeMp3Converter\Converter\Options\ConverterOptions;
 $options = new ConverterOptions();
 $options
     ->setAudioFormat('mp3')                    // mp3, wav, aac, m4a, opus, vorbis, flac
-    ->setAudioQuality(0)                       // 0 (best) to 9 (worst)
-    ->setVideoFormat('bestaudio/best')         // Video format selection
-    ->enableSponsorBlock()                     // Skip sponsored segments
-    ->setPlaylistItems('1-10')                 // Process specific items
-    ->setDateFilter('20220101', '20231231')    // Date range filter
+    ->setAudioQuality(0)                       // 0 (highest) to 9 (lowest) quality
+    ->setPlaylistItems('1-10')                 // Process specific playlist items
+    ->setDateAfter('20240101')                 // Videos after this date
+    ->setDateBefore('20241231')                // Videos before this date
     ->setFileSizeLimit('100M')                 // Maximum file size
     ->setOutputTemplate('%(title)s.%(ext)s')   // Custom output template
     ->setProxy('socks5://127.0.0.1:1080')      // Proxy configuration
-    ->setRateLimit(3)                          // Downloads per minute
-    ->enableThumbnail()                        // Embed thumbnail
+    ->setRateLimit(500)                        // Download speed limit (KB/s)
+    ->enableThumbnail(true)                    // Embed thumbnail
     ->setMetadata([                            // Custom metadata
-        'artist' => '%(uploader)s',
-        'title' => '%(title)s'
+        'artist' => 'Artist Name',
+        'album' => 'Album Name'
     ]);
 
 $converter = new YouTubeConverter($binPath, $outputDir, $tempDir, $progress, $options);
@@ -142,9 +146,21 @@ Main class for video conversion operations.
 
 #### Methods
 
-- `processVideo(string $url): array` - Process a single video or playlist
+- `processVideo(string $url): ConversionResult` - Convert single video
 - `getVideoInfo(string $url): array` - Get video metadata
-- `downloadVideo(string $url, string $id): string` - Download video file
+- `downloadVideo(string $url, string $id): string` - Download video file (internal)
+
+### ConversionResult Class
+
+Readonly result object returned by `processVideo()`:
+
+- `getOutputPath(): string` - Full path to converted file
+- `getTitle(): string` - Video title
+- `getVideoId(): string` - Internal process ID
+- `getFormat(): string` - Audio format (mp3, aac, etc.)
+- `getSize(): int` - File size in bytes
+- `getDuration(): float` - Duration in seconds
+- `toArray(): array` - Convert to array
 
 ### ConverterOptions Class
 
@@ -154,15 +170,14 @@ Configuration options for the converter.
 
 - `setAudioFormat(string $format): self` - Set output audio format
 - `setAudioQuality(int $quality): self` - Set audio quality (0-9)
-- `setVideoFormat(string $format): self` - Set video format selection
-- `enableSponsorBlock(): self` - Enable SponsorBlock integration
 - `setPlaylistItems(string $items): self` - Set playlist items to process
-- `setDateFilter(string $start, string $end): self` - Set date range filter
+- `setDateAfter(string $date): self` - Set start date filter (YYYYMMDD)
+- `setDateBefore(string $date): self` - Set end date filter (YYYYMMDD)
 - `setFileSizeLimit(string $limit): self` - Set maximum file size
 - `setOutputTemplate(string $template): self` - Set output filename template
 - `setProxy(string $proxy): self` - Set proxy server
-- `setRateLimit(int $limit): self` - Set rate limit
-- `enableThumbnail(): self` - Enable thumbnail embedding
+- `setRateLimit(int $limit): self` - Set download speed limit (KB/s)
+- `enableThumbnail(bool $enable): self` - Enable thumbnail embedding
 - `setMetadata(array $metadata): self` - Set audio metadata
 
 ### RemoteConverter Class
@@ -171,9 +186,9 @@ Handle remote conversion operations.
 
 #### Methods
 
-- `startConversion(string $url, ConverterOptions $options): string` - Start remote conversion
-- `getProgress(string $jobId): array` - Get conversion progress
-- `downloadFile(string $jobId, string $output): bool` - Download converted file
+- `processVideo(string $url): ConversionResult` - Process video on remote server
+- `getVideoInfo(string $url): array` - Get video info from remote server
+- `downloadVideo(string $url, string $id): string` - Download from remote server
 
 ### Progress Tracking
 
@@ -183,13 +198,11 @@ Both `FileProgress` and `RedisProgress` implement `ProgressInterface`:
 
 - `update(string $id, string $status, float $progress, string $message): void`
 - `get(string $id): ?array`
-- `delete(string $id): void`
-- `getAll(): array`
-- `cleanup(int $maxAge = 3600): void`
+- `remove(string $id): void`
 
 ## 🛠️ Error Handling
 
-The package uses custom exceptions for different error scenarios:
+The package uses custom exceptions with static factory methods:
 
 ```php
 use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
@@ -197,22 +210,28 @@ use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
 try {
     $result = $converter->processVideo($url);
 } catch (ConverterException $e) {
-    switch (true) {
-        case $e instanceof ConverterException:
-            // Handle conversion errors
-            break;
-        // Handle other specific exceptions
+    $message = $e->getMessage();
+    
+    // Check specific error types
+    if (str_contains($message, 'Invalid URL')) {
+        // Handle URL validation errors
+    } elseif (str_contains($message, 'Download failed')) {
+        // Handle download errors
+    } elseif (str_contains($message, 'Conversion failed')) {
+        // Handle FFmpeg conversion errors
+    } elseif (str_contains($message, 'Missing dependency')) {
+        // Handle missing software errors
     }
 }
 ```
 
 ## 🔒 Security
 
-- Token-based authentication for remote conversion
-- Rate limiting support
+- Input validation and URL sanitization
+- Safe file handling with proper permissions
 - Proxy support for restricted networks
-- Input validation and sanitization
-- Secure file handling
+- Cross-platform path handling
+- Secure temporary file management
 
 ## 📝 License
 

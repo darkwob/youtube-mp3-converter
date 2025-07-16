@@ -1,7 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Darkwob\YoutubeMp3Converter\Converter\Exceptions;
 
+/**
+ * @requires PHP >=8.4
+ */
 class ConverterException extends \Exception
 {
     public static function invalidUrl(string $url): self
@@ -19,6 +24,11 @@ class ConverterException extends \Exception
         return new self("Conversion failed for file: $file. Reason: $reason");
     }
 
+    public static function processingFailed(string $reason): self
+    {
+        return new self("Processing failed: $reason");
+    }
+
     public static function fileNotFound(string $path): self
     {
         return new self("File not found: $path");
@@ -32,6 +42,11 @@ class ConverterException extends \Exception
     public static function invalidQuality(int $quality): self
     {
         return new self("Invalid quality value: $quality. Must be between 0 and 9");
+    }
+
+    public static function invalidPath(string $message): self
+    {
+        return new self("Invalid path: $message");
     }
 
     public static function missingDependency(string $dependency): self
@@ -49,68 +64,38 @@ class ConverterException extends \Exception
         return new self("Remote server error at $url: $reason");
     }
 
-    public static function playlistError(string $url, string $reason): self
+    public static function invalidOutputDirectory(string $path): self
     {
-        return new self("Playlist error for URL $url: $reason");
+        return new self("Invalid output directory: $path");
     }
 
-    public static function networkError(string $url, string $reason): self
+    public static function videoInfoFailed(string $reason): self
     {
-        return new self("Network error while accessing $url: $reason");
+        return new self("Failed to get video info: $reason");
     }
 
-    public static function rateLimitExceeded(string $url): self
+    public static function networkError(string $reason): self
     {
-        return new self("Rate limit exceeded for URL: $url");
+        return new self("Network error: $reason");
     }
 
-    public static function geoRestricted(string $url): self
+    public static function authenticationFailed(string $reason): self
     {
-        return new self("Content is geo-restricted: $url");
+        return new self("Authentication failed: $reason");
     }
 
-    public static function unsupportedPlatform(string $url): self
+    public static function quotaExceeded(string $service): self
     {
-        return new self("Unsupported platform or URL: $url");
+        return new self("Quota exceeded for service: $service");
     }
 
-    public static function invalidResponse(string $url, string $reason): self
+    public static function unsupportedUrl(string $url): self
     {
-        return new self("Invalid response from $url: $reason");
+        return new self("Unsupported URL: $url");
     }
 
-    public static function processingTimeout(string $url): self
+    public static function timeoutError(string $operation): self
     {
-        return new self("Processing timeout for URL: $url");
-    }
-
-    public static function diskSpaceError(string $path): self
-    {
-        return new self("Insufficient disk space at: $path");
-    }
-
-    public static function permissionError(string $path): self
-    {
-        return new self("Permission denied: $path");
-    }
-
-    public static function metadataError(string $file, string $reason): self
-    {
-        return new self("Metadata error for file $file: $reason");
-    }
-
-    public static function thumbnailError(string $url, string $reason): self
-    {
-        return new self("Thumbnail error for URL $url: $reason");
-    }
-
-    public static function videoInfoFailed(string $reason = ''): self
-    {
-        return new self("Failed to get video info" . ($reason ? ": $reason" : ""));
-    }
-
-    public static function invalidOutputDirectory(string $directory): self
-    {
-        return new self("Cannot create output directory: $directory");
+        return new self("Timeout during operation: $operation");
     }
 } 

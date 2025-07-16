@@ -1,10 +1,17 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Darkwob\YoutubeMp3Converter\Converter\Remote;
 
 use Darkwob\YoutubeMp3Converter\Converter\Interfaces\ConverterInterface;
 use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
 use Darkwob\YoutubeMp3Converter\Progress\Interfaces\ProgressInterface;
+use Darkwob\YoutubeMp3Converter\Converter\ConversionResult;
+
+/**
+ * @requires PHP >=8.4
+ */
 
 class RemoteConverter implements ConverterInterface
 {
@@ -31,7 +38,7 @@ class RemoteConverter implements ConverterInterface
         $this->connectTimeout = $connectTimeout;
     }
 
-    public function processVideo(string $url): array
+    public function processVideo(string $url): ConversionResult
     {
         try {
             $response = $this->makeRequest('POST', '/process', [
@@ -49,10 +56,11 @@ class RemoteConverter implements ConverterInterface
 
             // İlerleme takibi
             if (isset($response['job_id'])) {
-                return $this->trackProgress($response['job_id']);
+                $result = $this->trackProgress($response['job_id']);
+                return ConversionResult::fromArray($result);
             }
 
-            return $response;
+            return ConversionResult::fromArray($response);
 
         } catch (\Exception $e) {
             throw new ConverterException('Remote server error: ' . $e->getMessage());

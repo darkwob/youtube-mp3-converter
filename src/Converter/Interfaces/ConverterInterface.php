@@ -1,17 +1,24 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Darkwob\YoutubeMp3Converter\Converter\Interfaces;
 
+use Darkwob\YoutubeMp3Converter\Converter\ConversionResult;
+
+/**
+ * @requires PHP >=8.4
+ */
 interface ConverterInterface
 {
     /**
      * Process video for conversion
      * 
      * @param string $url Video URL
-     * @return array Processing result
+     * @return ConversionResult Processing result
      * @throws \Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException
      */
-    public function processVideo(string $url): array;
+    public function processVideo(string $url): ConversionResult;
 
     /**
      * Get video information
