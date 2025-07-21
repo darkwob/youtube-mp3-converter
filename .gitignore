@@ -50,4 +50,7 @@ Thumbs.db
 .env.*.local
 
 # Wiki (separate repository)
-wiki/ 
+wiki/
+
+# Kiro IDE files
+.kiro/ 
