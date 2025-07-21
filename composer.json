@@ -24,7 +24,7 @@
         }
     ],
     "require": {
-        "php": ">=8.4",
+        "php": ">=8.3",
         "symfony/process": "^5.4|^6.0|^7.0",
         "guzzlehttp/guzzle": "^7.0",
         "ext-json": "*"
@@ -53,5 +53,8 @@
         "issues": "https://github.com/darkwob/youtube-mp3-converter/issues",
         "source": "https://github.com/darkwob/youtube-mp3-converter",
         "docs": "https://github.com/darkwob/youtube-mp3-converter/wiki"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.2"
     }
-} 
+}

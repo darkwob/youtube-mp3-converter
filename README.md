@@ -1,21 +1,24 @@
 # 🎵 YouTube to MP3 Converter
 
-![PHP Version](https://img.shields.io/badge/PHP-%3E%3D8.4-blue)
+![PHP Version](https://img.shields.io/badge/PHP-%3E%3D8.3-blue)
 ![Status](https://img.shields.io/badge/Status-Stable-green)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-A powerful and feature-rich YouTube to MP3 converter library for PHP 8.4+ that supports YouTube video conversion with extensive customization options, progress tracking, and remote conversion capabilities.
+A powerful and feature-rich YouTube to MP3 converter library for PHP 8.3+ that supports YouTube video conversion with extensive customization options, progress tracking, and Windows compatibility with enhanced binary management.
 
 ## ✨ Key Features
 
 - 🎵 Convert YouTube videos to multiple audio formats (MP3, AAC, FLAC, WAV, etc.)
 - 📊 Real-time progress tracking (File-based or Redis)
 - 🌐 Remote server conversion support
-- 🔒 Clean and modern PHP 8.4+ API with readonly properties
+- 🔒 Clean and modern PHP 8.3+ API with readonly properties
 - 🛠️ Extensive configuration options (quality, metadata, thumbnails)
 - 🎯 ConversionResult objects for type-safe results
 - 🔄 Cross-platform compatibility (Windows, Linux, macOS)
 - 🚀 Robust error handling with specific exception types
+- 🪟 Enhanced Windows support with path normalization
+- 🔧 Intelligent binary detection and management
+- 📁 Advanced directory and process management
 
 ## 🚀 Installation
 
@@ -25,11 +28,12 @@ composer require darkwob/youtube-mp3-converter
 
 ### Requirements
 
-- PHP >= 8.4 (required)
+- PHP >= 8.3 (required)
 - JSON extension
 - FFmpeg (required for audio conversion)
 - yt-dlp (required for video downloading)
 - Redis (optional, for Redis-based progress tracking)
+- Windows: Proper PATH environment or binary placement in project directory
 
 ## 💻 Basic Usage
 
@@ -47,13 +51,13 @@ $progress = new FileProgress(__DIR__ . '/progress');
 $options = new ConverterOptions();
 $options->setAudioFormat('mp3')->setAudioQuality(0); // Highest quality
 
-// Initialize converter (5 parameters required)
+// Initialize converter (binaries auto-detected or specify paths)
 $converter = new YouTubeConverter(
-    __DIR__ . '/bin',           // Binary path (yt-dlp, ffmpeg)
     __DIR__ . '/downloads',     // Output directory
     __DIR__ . '/temp',          // Temporary directory
     $progress,                  // Progress tracker
-    $options                    // Converter options
+    $options,                   // Converter options (optional)
+    __DIR__ . '/bin'            // Binary path (optional, auto-detected if not provided)
 );
 
 // Convert a video
@@ -93,7 +97,7 @@ $options
         'album' => 'Album Name'
     ]);
 
-$converter = new YouTubeConverter($binPath, $outputDir, $tempDir, $progress, $options);
+$converter = new YouTubeConverter($outputDir, $tempDir, $progress, $options);
 ```
 
 ### Remote Conversion
@@ -202,26 +206,38 @@ Both `FileProgress` and `RedisProgress` implement `ProgressInterface`:
 
 ## 🛠️ Error Handling
 
-The package uses custom exceptions with static factory methods:
+The package uses specific exception types for better error handling:
 
 ```php
-use Darkwob\YoutubeMp3Converter\Converter\Exceptions\ConverterException;
+use Darkwob\YoutubeMp3Converter\Converter\Exceptions\{
+    ConverterException,
+    InvalidUrlException,
+    BinaryNotFoundException,
+    DirectoryException,
+    ProcessException,
+    NetworkException
+};
 
 try {
     $result = $converter->processVideo($url);
+} catch (InvalidUrlException $e) {
+    // Handle URL validation errors
+    echo "Invalid YouTube URL: " . $e->getMessage();
+} catch (BinaryNotFoundException $e) {
+    // Handle missing binary errors with installation instructions
+    echo "Missing software: " . $e->getMessage();
+} catch (DirectoryException $e) {
+    // Handle directory creation/permission errors
+    echo "Directory error: " . $e->getMessage();
+} catch (ProcessException $e) {
+    // Handle binary execution errors
+    echo "Process error: " . $e->getMessage();
+} catch (NetworkException $e) {
+    // Handle network/connection errors
+    echo "Network error: " . $e->getMessage();
 } catch (ConverterException $e) {
-    $message = $e->getMessage();
-    
-    // Check specific error types
-    if (str_contains($message, 'Invalid URL')) {
-        // Handle URL validation errors
-    } elseif (str_contains($message, 'Download failed')) {
-        // Handle download errors
-    } elseif (str_contains($message, 'Conversion failed')) {
-        // Handle FFmpeg conversion errors
-    } elseif (str_contains($message, 'Missing dependency')) {
-        // Handle missing software errors
-    }
+    // Handle general conversion errors
+    echo "Conversion error: " . $e->getMessage();
 }
 ```
 
@@ -230,8 +246,10 @@ try {
 - Input validation and URL sanitization
 - Safe file handling with proper permissions
 - Proxy support for restricted networks
-- Cross-platform path handling
-- Secure temporary file management
+- Cross-platform path handling with Windows normalization
+- Secure temporary file management with automatic cleanup
+- Binary path validation and security checks
+- Windows environment variable handling
 
 ## 📝 License
 
