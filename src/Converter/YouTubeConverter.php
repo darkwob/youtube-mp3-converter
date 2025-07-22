@@ -388,6 +388,219 @@ class YouTubeConverter implements ConverterInterface
     }
 
     /**
+     * Process YouTube playlist
+     * 
+     * @param string $playlistUrl YouTube playlist URL
+     * @return array Array of ConversionResult objects
+     * @throws InvalidUrlException If playlist URL is invalid
+     * @throws ConverterException If processing fails
+     */
+    public function processPlaylist(string $playlistUrl): array
+    {
+        // Validate playlist URL
+        $this->validatePlaylistUrl($playlistUrl);
+        
+        $playlistId = $this->extractPlaylistId($playlistUrl);
+        $startTime = time();
+        
+        try {
+            // Get playlist information
+            $playlistInfo = $this->getPlaylistInfo($playlistUrl);
+            $videos = $playlistInfo['entries'] ?? [];
+            
+            if (empty($videos)) {
+                throw ConverterException::processingFailed('No videos found in playlist');
+            }
+            
+            // Apply playlist items filter if specified
+            if ($this->options->getPlaylistItems()) {
+                $videos = $this->filterPlaylistItems($videos, $this->options->getPlaylistItems());
+            }
+            
+            $results = [];
+            $totalVideos = count($videos);
+            
+            foreach ($videos as $index => $video) {
+                try {
+                    $videoUrl = $video['webpage_url'] ?? "https://www.youtube.com/watch?v={$video['id']}";
+                    
+                    // Update playlist progress
+                    $this->trackProgress($playlistId, 'downloading', 
+                        (int)(($index / $totalVideos) * 100), 
+                        "Processing video " . ($index + 1) . " of {$totalVideos}: {$video['title']}", 
+                        [
+                            'start_time' => $startTime,
+                            'current_video' => $index + 1,
+                            'total_videos' => $totalVideos,
+                            'video_title' => $video['title']
+                        ]
+                    );
+                    
+                    // Process individual video
+                    $result = $this->processVideo($videoUrl);
+                    $results[] = $result;
+                    
+                } catch (ConverterException $e) {
+                    // Log error but continue with other videos
+                    error_log("Failed to process video {$video['title']}: " . $e->getMessage());
+                    continue;
+                }
+            }
+            
+            // Update playlist progress - completed
+            $this->trackProgress($playlistId, 'completed', 100, 
+                "Playlist processing completed. {$totalVideos} videos processed.", 
+                [
+                    'start_time' => $startTime,
+                    'total_videos' => $totalVideos,
+                    'successful_videos' => count($results),
+                    'total_time' => time() - $startTime
+                ]
+            );
+            
+            return $results;
+            
+        } catch (\Exception $e) {
+            $this->trackProgress($playlistId, 'error', 0, $e->getMessage(), [
+                'start_time' => $startTime,
+                'error_type' => get_class($e),
+                'total_time' => time() - $startTime
+            ]);
+            throw ConverterException::processingFailed("Playlist processing failed: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get playlist information
+     * 
+     * @param string $playlistUrl YouTube playlist URL
+     * @return array Playlist information with video entries
+     * @throws ConverterException If playlist info extraction fails
+     */
+    public function getPlaylistInfo(string $playlistUrl): array
+    {
+        try {
+            return $this->processManager->getPlaylistInfo($playlistUrl);
+        } catch (\Exception $e) {
+            throw ConverterException::processingFailed("Failed to get playlist info: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Extract playlist ID from YouTube playlist URL
+     * 
+     * @param string $url YouTube playlist URL
+     * @return string Playlist ID
+     * @throws InvalidUrlException If playlist ID cannot be extracted
+     */
+    public function extractPlaylistId(string $url): string
+    {
+        // YouTube playlist URL patterns
+        $patterns = [
+            '/[?&]list=([a-zA-Z0-9_-]+)/',
+            '/youtube\.com\/playlist\?list=([a-zA-Z0-9_-]+)/',
+        ];
+        
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $url, $matches)) {
+                return $matches[1];
+            }
+        }
+        
+        throw InvalidUrlException::invalidPlaylistUrl($url);
+    }
+
+    /**
+     * Validate playlist URL
+     * 
+     * @param string $url Playlist URL to validate
+     * @throws InvalidUrlException If URL is invalid
+     */
+    public function validatePlaylistUrl(string $url): void
+    {
+        // Check if URL is empty
+        if (empty(trim($url))) {
+            throw InvalidUrlException::emptyUrl();
+        }
+        
+        // Basic URL format validation
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            throw InvalidUrlException::malformedUrl($url);
+        }
+        
+        // Check if it contains playlist parameter
+        if (!str_contains($url, 'list=')) {
+            throw InvalidUrlException::invalidPlaylistUrl($url);
+        }
+        
+        // Try to extract playlist ID
+        try {
+            $this->extractPlaylistId($url);
+        } catch (InvalidUrlException $e) {
+            throw $e;
+        }
+    }
+
+    /**
+     * Filter playlist items based on selection
+     * 
+     * @param array $videos Array of video entries
+     * @param string $items Item selection (e.g., '1,3,5-7')
+     * @return array Filtered video entries
+     */
+    private function filterPlaylistItems(array $videos, string $items): array
+    {
+        $selectedIndices = [];
+        $parts = explode(',', $items);
+        
+        foreach ($parts as $part) {
+            $part = trim($part);
+            
+            if (str_contains($part, '-')) {
+                // Range selection (e.g., '5-7')
+                [$start, $end] = explode('-', $part, 2);
+                $start = max(1, (int)trim($start));
+                $end = min(count($videos), (int)trim($end));
+                
+                for ($i = $start; $i <= $end; $i++) {
+                    $selectedIndices[] = $i - 1; // Convert to 0-based index
+                }
+            } else {
+                // Single item selection (e.g., '3')
+                $index = max(1, (int)$part);
+                if ($index <= count($videos)) {
+                    $selectedIndices[] = $index - 1; // Convert to 0-based index
+                }
+            }
+        }
+        
+        // Remove duplicates and sort
+        $selectedIndices = array_unique($selectedIndices);
+        sort($selectedIndices);
+        
+        // Filter videos based on selected indices
+        $filteredVideos = [];
+        foreach ($selectedIndices as $index) {
+            if (isset($videos[$index])) {
+                $filteredVideos[] = $videos[$index];
+            }
+        }
+        
+        return $filteredVideos;
+    }
+
+    /**
+     * Check if URL is a playlist URL
+     * 
+     * @param string $url URL to check
+     * @return bool True if URL is a playlist URL
+     */
+    public function isPlaylistUrl(string $url): bool
+    {
+        return str_contains($url, 'list=') || str_contains($url, '/playlist');
+    }
+
+    /**
      * Validate URL with comprehensive URL validation
      * 
      * @param string $url URL to validate

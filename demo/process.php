@@ -84,7 +84,12 @@ function handleProcessRequest(): void
 
     $progress = new FileProgress(__DIR__ . '/progress');
     $options = new ConverterOptions();
-    $options->setAudioFormat('mp3')->setAudioQuality(9); // High quality
+    $options->setAudioFormat('mp3')->setAudioQuality(0); // High quality
+    
+    // Apply playlist items filter if specified
+    if (!empty($_POST['playlist_items'])) {
+        $options->setPlaylistItems($_POST['playlist_items']);
+    }
     
     $converter = new YouTubeConverter(
         __DIR__ . '/downloads',
@@ -93,13 +98,29 @@ function handleProcessRequest(): void
         $options
     );
 
+    $url = $_POST['url'];
+    
+    // Check if it's a playlist URL
+    if ($converter->isPlaylistUrl($url)) {
+        handlePlaylistRequest($converter, $url, $progress);
+    } else {
+        handleSingleVideoRequest($converter, $url, $progress);
+    }
+}
+
+/**
+ * Handle single video processing
+ */
+function handleSingleVideoRequest(YouTubeConverter $converter, string $url, FileProgress $progress): void
+{
     // First get video info to create initial response
-    $videoInfo = $converter->getVideoInfo($_POST['url']);
-    $videoId = $converter->extractVideoId($_POST['url']);
+    $videoInfo = $converter->getVideoInfo($url);
+    $videoId = $converter->extractVideoId($url);
     
     // Return initial video info immediately
     echo json_encode([
         'success' => true,
+        'type' => 'single_video',
         'results' => [[
             'id' => $videoId,
             'title' => $videoInfo['title'],
@@ -119,7 +140,7 @@ function handleProcessRequest(): void
     
     // Continue processing in background
     try {
-        $result = $converter->processVideo($_POST['url']);
+        $result = $converter->processVideo($url);
         
         // Update progress file with completion status
         $progress->update($videoId, 'completed', 100, 'Conversion completed successfully');
@@ -127,6 +148,60 @@ function handleProcessRequest(): void
     } catch (\Exception $e) {
         // Update progress file with error status
         $progress->update($videoId, 'error', 0, $e->getMessage());
+    }
+}
+
+/**
+ * Handle playlist processing
+ */
+function handlePlaylistRequest(YouTubeConverter $converter, string $playlistUrl, FileProgress $progress): void
+{
+    // First get playlist info to create initial response
+    $playlistInfo = $converter->getPlaylistInfo($playlistUrl);
+    $playlistId = $converter->extractPlaylistId($playlistUrl);
+    $videos = $playlistInfo['entries'] ?? [];
+    
+    // Prepare initial response with video list
+    $videoList = [];
+    foreach ($videos as $index => $video) {
+        $videoList[] = [
+            'id' => $video['id'],
+            'title' => $video['title'] ?? 'Unknown Title',
+            'duration' => $video['duration'] ?? 0,
+            'thumbnail' => $video['thumbnail'] ?? null,
+            'uploader' => $video['uploader'] ?? 'Unknown',
+            'status' => 'pending',
+            'index' => $index + 1
+        ];
+    }
+    
+    // Return initial playlist info immediately
+    echo json_encode([
+        'success' => true,
+        'type' => 'playlist',
+        'playlist_id' => $playlistId,
+        'total_videos' => count($videos),
+        'results' => $videoList,
+        'message' => 'Playlist processing started'
+    ]);
+    
+    // Flush output to send response immediately
+    if (ob_get_level()) {
+        ob_end_flush();
+    }
+    flush();
+    
+    // Continue processing in background
+    try {
+        $results = $converter->processPlaylist($playlistUrl);
+        
+        // Update progress file with completion status
+        $progress->update($playlistId, 'completed', 100, 
+            'Playlist processing completed. ' . count($results) . ' videos converted successfully');
+        
+    } catch (\Exception $e) {
+        // Update progress file with error status
+        $progress->update($playlistId, 'error', 0, $e->getMessage());
     }
 }
 

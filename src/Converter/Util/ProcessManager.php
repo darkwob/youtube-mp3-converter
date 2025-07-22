@@ -121,6 +121,52 @@ class ProcessManager
     }
     
     /**
+     * Get playlist information using yt-dlp
+     */
+    public function getPlaylistInfo(string $playlistUrl): array
+    {
+        $arguments = [
+            '--dump-json',
+            '--flat-playlist',
+            '--no-download',
+            '--no-warnings',
+            $playlistUrl
+        ];
+        
+        $result = $this->executeYtDlp($arguments, null, self::VIDEO_INFO_TIMEOUT);
+        
+        if (!$result->isSuccessful()) {
+            throw ConverterException::videoInfoFailed(
+                "Failed to extract playlist info: " . $result->getErrorOutput()
+            );
+        }
+        
+        $output = trim($result->getOutput());
+        if (empty($output)) {
+            throw ConverterException::videoInfoFailed("Empty response from yt-dlp for playlist");
+        }
+        
+        // Parse JSON lines (one JSON object per video)
+        $lines = explode("\n", $output);
+        $entries = [];
+        
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (!empty($line)) {
+                $videoData = json_decode($line, true);
+                if ($videoData && isset($videoData['id'])) {
+                    $entries[] = $videoData;
+                }
+            }
+        }
+        
+        return [
+            'entries' => $entries,
+            'playlist_count' => count($entries)
+        ];
+    }
+    
+    /**
      * Create Symfony Process with Windows environment setup
      */
     private function createProcess(array $command, ?string $workingDir = null, ?int $timeout = null): Process

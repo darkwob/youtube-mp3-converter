@@ -45,4 +45,9 @@ class InvalidUrlException extends ConverterException
     {
         return new self("Video is age-restricted and cannot be processed: $url");
     }
+    
+    public static function invalidPlaylistUrl(string $url): self
+    {
+        return new self("Invalid YouTube playlist URL. URL must contain 'list=' parameter. Got: {$url}");
+    }
 }

@@ -9,6 +9,9 @@ A powerful and feature-rich YouTube to MP3 converter library for PHP 8.3+ that s
 ## ✨ Key Features
 
 - 🎵 Convert YouTube videos to multiple audio formats (MP3, AAC, FLAC, WAV, etc.)
+- 📋 **Full playlist support** - Convert entire playlists or specific items
+- 🎯 **Smart URL detection** - Automatically handles single videos and playlists
+- 🎶 **YouTube Music support** - Works with YouTube Music URLs
 - 📊 Real-time progress tracking (File-based or Redis)
 - 🌐 Remote server conversion support
 - 🔒 Clean and modern PHP 8.3+ API with readonly properties
@@ -60,7 +63,7 @@ $converter = new YouTubeConverter(
     __DIR__ . '/bin'            // Binary path (optional, auto-detected if not provided)
 );
 
-// Convert a video
+// Convert a single video
 try {
     $result = $converter->processVideo('https://www.youtube.com/watch?v=VIDEO_ID');
     
@@ -72,6 +75,44 @@ try {
     
 } catch (ConverterException $e) {
     echo "Error: " . $e->getMessage();
+}
+```
+
+### Playlist Conversion
+
+```php
+// Convert entire YouTube playlist
+try {
+    $results = $converter->processPlaylist('https://www.youtube.com/playlist?list=PLAYLIST_ID');
+    
+    echo "Converted " . count($results) . " videos from playlist:\n";
+    foreach ($results as $result) {
+        echo "- " . $result->getTitle() . " (" . $result->getFormat() . ")\n";
+    }
+    
+} catch (ConverterException $e) {
+    echo "Error: " . $e->getMessage();
+}
+
+// Convert specific playlist items (e.g., videos 1-5 and 10)
+$options->setPlaylistItems('1-5,10');
+$converter = new YouTubeConverter($outputDir, $tempDir, $progress, $options);
+
+$results = $converter->processPlaylist('https://www.youtube.com/playlist?list=PLAYLIST_ID');
+```
+
+### Smart URL Processing
+
+```php
+// Automatically detect and process single videos or playlists
+$url = 'https://www.youtube.com/watch?v=VIDEO_ID'; // or playlist URL
+
+if ($converter->isPlaylistUrl($url)) {
+    $results = $converter->processPlaylist($url);
+    echo "Processed " . count($results) . " videos from playlist\n";
+} else {
+    $result = $converter->processVideo($url);
+    echo "Processed single video: " . $result->getTitle() . "\n";
 }
 ```
 
@@ -151,7 +192,12 @@ Main class for video conversion operations.
 #### Methods
 
 - `processVideo(string $url): ConversionResult` - Convert single video
+- `processPlaylist(string $playlistUrl): array` - Convert YouTube playlist
 - `getVideoInfo(string $url): array` - Get video metadata
+- `getPlaylistInfo(string $playlistUrl): array` - Get playlist metadata
+- `isPlaylistUrl(string $url): bool` - Check if URL is a playlist
+- `extractVideoId(string $url): string` - Extract video ID from URL
+- `extractPlaylistId(string $url): string` - Extract playlist ID from URL
 - `downloadVideo(string $url, string $id): string` - Download video file (internal)
 
 ### ConversionResult Class
